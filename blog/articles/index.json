@@ -1,0 +1,70 @@
+{
+  "articles": [
+    {
+      "filename": "2024/12/2024-12-15-tui-animations.md",
+      "title": "Creating Beautiful TUI Animations",
+      "slug": "tui-animations",
+      "date": "2024-12-15",
+      "author": "TStorie Team",
+      "category": "tutorials",
+      "excerpt": "Learn how to create smooth animations in terminal applications using TStorie",
+      "published": true,
+      "featured": false,
+      "tags": [
+        "animation",
+        "tui",
+        "advanced",
+        "graphics"
+      ]
+    },
+    {
+      "filename": "2024/12/2024-12-01-first-post.md",
+      "title": "Welcome to TStorie Blog",
+      "slug": "first-post",
+      "date": "2024-12-01",
+      "author": "TStorie Team",
+      "category": "announcements",
+      "excerpt": "An introduction to building terminal-based blogs with the TStorie engine",
+      "published": true,
+      "featured": true,
+      "tags": [
+        "welcome",
+        "tui",
+        "introduction"
+      ]
+    },
+    {
+      "filename": "2024/11/2024-11-20-getting-started.md",
+      "title": "Getting Started with TStorie",
+      "slug": "getting-started",
+      "date": "2024-11-20",
+      "author": "TStorie Team",
+      "category": "tutorials",
+      "excerpt": "A comprehensive guide to setting up and using the TStorie framework",
+      "published": true,
+      "featured": false,
+      "tags": [
+        "beginner",
+        "setup",
+        "guide"
+      ]
+    }
+  ],
+  "categories": [
+    "announcements",
+    "tutorials"
+  ],
+  "tags": [
+    "welcome",
+    "tui",
+    "introduction",
+    "animation",
+    "advanced",
+    "graphics",
+    "beginner",
+    "setup",
+    "guide"
+  ],
+  "generated": "2024-12-16T00:00:00Z",
+  "totalArticles": 3
+}

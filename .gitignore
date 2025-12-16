@@ -14,6 +14,11 @@ web/storie.wasm.wasm
 emsdk/
 .emsdk/
 
+# Emscripten cache and temporary files
+.emscripten_cache/
+.emscripten_ports/
+.emscripten_sanity
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -24,6 +29,7 @@ Thumbs.db
 *~
 .vscode/
 .idea/
+.envrc
 
 # Logs
 *.log
