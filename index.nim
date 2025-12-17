@@ -86,9 +86,20 @@ EM_JS(void, emFetchArticleIndex, (), {
     window.articlesData = null;
     window.articleContentCallbacks = {};
     
-    console.log('Fetching articles/index.json...');
-    fetch('articles/index.json')
-      .then(response => response.json())
+    // Get base path from current page location (works for GitHub Pages subdirectories)
+    var basePath = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
+    var articlesUrl = basePath + 'articles/index.json';
+    
+    console.log('Base path:', basePath);
+    console.log('Fetching articles index from:', articlesUrl);
+    fetch(articlesUrl)
+      .then(response => {
+        if (!response.ok) {
+          console.error('Failed to fetch articles index:', response.status, response.statusText);
+          throw new Error('HTTP error ' + response.status);
+        }
+        return response.json();
+      })
       .then(data => {
         console.log('Articles fetched:', data);
         console.log('data["articles"]:', data['articles']);
@@ -131,8 +142,20 @@ EM_JS(char*, emGetArticleFieldRaw, (int index, const char* field), {
 
 EM_JS(void, emFetchArticleContentRaw, (const char* filename, int callbackId), {
   var fname = UTF8ToString(filename);
-  fetch('articles/' + fname)
-    .then(response => response.text())
+  
+  // Get base path from current page location
+  var basePath = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
+  var articleUrl = basePath + 'articles/' + fname;
+  
+  console.log('Fetching article from:', articleUrl);
+  fetch(articleUrl)
+    .then(response => {
+      if (!response.ok) {
+        console.error('Failed to fetch article:', response.status, response.statusText, articleUrl);
+        throw new Error('HTTP error ' + response.status);
+      }
+      return response.text();
+    })
     .then(content => {
       if (!window.articleContentCallbacks) window.articleContentCallbacks = {};
       window.articleContentCallbacks[callbackId] = content;
