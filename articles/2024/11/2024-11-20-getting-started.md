@@ -1,6 +1,6 @@
 ---
 title: Getting Started with TStorie
-author: TStorie Team
+author: Maddest Labs
 date: 2024-11-20
 category: tutorials
 tags: beginner, setup, guide

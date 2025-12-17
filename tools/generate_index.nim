@@ -4,7 +4,7 @@
 ## with metadata for all published articles.
 
 import os, strutils, json, tables, sequtils, algorithm
-import ../../lib/storie_md
+import ../lib/storie_md
 
 proc extractSlug(filename: string): string =
   ## Extract slug from filename like "2024-12-01-first-post.md"
@@ -23,7 +23,7 @@ proc scanArticles() =
   
   echo "Scanning articles directory..."
   
-  for file in walkDirRec("blog/articles"):
+  for file in walkDirRec("articles"):
     if file.endsWith(".md"):
       echo "  Found: ", file
       
@@ -32,8 +32,8 @@ proc scanArticles() =
         let doc = parseMarkdownDocument(content)
         
         if doc.frontMatter.len > 0:
-          # Extract relative path from blog/articles/
-          let relPath = file.replace("blog/articles/", "")
+          # Extract relative path from articles/
+          let relPath = file.replace("articles/", "")
           
           # Get values from front matter
           let title = doc.frontMatter.getOrDefault("title", "Untitled")
@@ -97,7 +97,7 @@ proc scanArticles() =
   }
   
   # Write to file
-  let indexPath = "blog/articles/index.json"
+  let indexPath = "articles/index.json"
   writeFile(indexPath, output.pretty())
   
   echo "\n✓ Generated index.json with ", articles.len, " articles"
@@ -109,8 +109,8 @@ when isMainModule:
   echo "======================================"
   echo ""
   
-  if not dirExists("blog/articles"):
-    echo "Error: blog/articles directory not found"
+  if not dirExists("articles"):
+    echo "Error: articles directory not found"
     echo "Please run this from the project root directory"
     quit(1)
   

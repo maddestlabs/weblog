@@ -161,7 +161,7 @@ NIM_OPTS="c
 
 # Emscripten flags
 export EMCC_CFLAGS="-s ALLOW_MEMORY_GROWTH=1 \
-  -s EXPORTED_FUNCTIONS=['_malloc','_free','_emInit','_emUpdate','_emResize','_emGetCell','_emGetCellFgR','_emGetCellFgG','_emGetCellFgB','_emGetCellBgR','_emGetCellBgG','_emGetCellBgB','_emGetCellBold','_emGetCellItalic','_emGetCellUnderline','_emHandleKeyPress','_emHandleTextInput','_emHandleMouseClick','_emHandleMouseMove','_emSetWaitingForGist','_emLoadMarkdownFromJS'] \
+  -s EXPORTED_FUNCTIONS=['_malloc','_free','_emInit','_emUpdate','_emResize','_emGetCell','_emGetCellFgR','_emGetCellFgG','_emGetCellFgB','_emGetCellBgR','_emGetCellBgG','_emGetCellBgB','_emGetCellBold','_emGetCellItalic','_emGetCellUnderline','_emHandleKeyPress','_emHandleTextInput','_emHandleMouseClick','_emHandleMouseMove','_emSetWaitingForGist','_emLoadMarkdownFromJS','_emOnArticlesLoaded','_emOnArticleContentLoaded'] \
   -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','allocateUTF8','UTF8ToString','lengthBytesUTF8','stringToUTF8'] \
   -s MODULARIZE=0 \
   -s EXPORT_NAME='Module' \
@@ -207,6 +207,18 @@ if [ "$OUTPUT_DIR" != "web" ]; then
         cp index.md "$OUTPUT_DIR/index.md"
         echo "  - $OUTPUT_DIR/index.md (runtime content)"
     fi
+    # Copy articles directory and index.json for blog
+    if [ -d "articles" ]; then
+        echo ""
+        echo "Deploying blog content..."
+        cp -r articles "$OUTPUT_DIR/"
+        echo "  - $OUTPUT_DIR/articles/ (blog articles)"
+    fi
+    # Copy assets directory if it exists
+    if [ -d "assets" ]; then
+        cp -r assets "$OUTPUT_DIR/"
+        echo "  - $OUTPUT_DIR/assets/ (blog assets)"
+    fi
 else
     echo "  - $OUTPUT_DIR/tstorie.js (JavaScript interface)"
     echo "  - $OUTPUT_DIR/index.html (HTML template)"
@@ -214,6 +226,18 @@ else
     if [ -f "index.md" ]; then
         cp index.md "$OUTPUT_DIR/index.md"
         echo "  - $OUTPUT_DIR/index.md (runtime content)"
+    fi
+    # Copy articles directory and index.json for blog
+    if [ -d "articles" ]; then
+        echo ""
+        echo "Deploying blog content..."
+        cp -r articles "$OUTPUT_DIR/"
+        echo "  - $OUTPUT_DIR/articles/ (blog articles)"
+    fi
+    # Copy assets directory if it exists
+    if [ -d "assets" ]; then
+        cp -r assets "$OUTPUT_DIR/"
+        echo "  - $OUTPUT_DIR/assets/ (blog assets)"
     fi
 fi
 

@@ -1,6 +1,6 @@
 ---
 title: Creating Beautiful TUI Animations
-author: TStorie Team
+author: Maddest Labs
 date: 2024-12-15
 category: tutorials
 tags: animation, tui, advanced, graphics

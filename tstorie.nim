@@ -965,6 +965,13 @@ when not defined(emscripten):
 # ================================================================
 
 when defined(emscripten):
+  # Console logging for WASM using EM_ASM
+  proc emscripten_run_script(script: cstring) {.importc, header: "<emscripten.h>".}
+  
+  proc debugLog*(msg: string) =
+    let script = "console.log('" & msg.replace("'", "\\'") & "');"
+    emscripten_run_script(cstring(script))
+  
   var globalState: AppState
   var lastRenderExecutedCount*: int = -1
   var lastError*: string = ""
@@ -1005,30 +1012,9 @@ when defined(emscripten):
   
   # Direct render caller for WASM
   proc renderStorie(state: AppState) =
-    # Call the render logic from index.nim directly
-    if storieCtx.isNil:
-      return
-    
-    # Check if we have any render blocks
-    var hasRenderBlocks = false
-    var renderBlockCount = 0
-    for codeBlock in storieCtx.codeBlocks:
-      if codeBlock.lifecycle == "render":
-        hasRenderBlocks = true
-        renderBlockCount += 1
-    
-    if not hasRenderBlocks:
-      return
-    
-    # Execute render code blocks - they write to layers
-    var executedCount = 0
-    for codeBlock in storieCtx.codeBlocks:
-      if codeBlock.lifecycle == "render":
-        let success = executeCodeBlock(storieCtx.niminiContext, codeBlock, state)
-        if success:
-          executedCount += 1
-    
-    lastRenderExecutedCount = executedCount
+    # Call the render callback if available
+    if not onRender.isNil:
+      onRender(state)
 
   proc userInput(state: AppState, event: InputEvent): bool =
     if not onInput.isNil:
@@ -1040,6 +1026,10 @@ when defined(emscripten):
       onShutdown(state)
   
   proc emInit(width, height: int) {.exportc.} =
+    # Initialize blog callbacks (must be called explicitly for WASM)
+    when declared(initBlogCallbacks):
+      initBlogCallbacks()
+    
     globalState = new(AppState)
     globalState.termWidth = width
     globalState.termHeight = height
@@ -1054,8 +1044,9 @@ when defined(emscripten):
     globalState.lastMouseY = 0
     globalState.fps = 60.0
     
-    # Call initStorieContext directly (callback system doesn't work in WASM)
-    initStorieContext(globalState)
+    # Call onInit callback if available
+    if not onInit.isNil:
+      onInit(globalState)
   
   proc emUpdate(deltaMs: float) {.exportc.} =
     let dt = deltaMs / 1000.0
@@ -1066,21 +1057,16 @@ when defined(emscripten):
       globalState.fps = 1.0 / dt
       globalState.lastFpsUpdate = globalState.totalTime
     
-    # Call update directly
-    if not storieCtx.isNil:
-      for codeBlock in storieCtx.codeBlocks:
-        if codeBlock.lifecycle == "update":
-          discard executeCodeBlock(storieCtx.niminiContext, codeBlock, globalState)
+    # Call update callback if available
+    if not onUpdate.isNil:
+      onUpdate(globalState, dt)
     
     # Clear current buffer before rendering
     globalState.currentBuffer.clear()
     
     # Clear layer buffers each frame
-    if not storieCtx.isNil:
-      if not storieCtx.bgLayer.isNil:
-        storieCtx.bgLayer.buffer.clearTransparent()
-      if not storieCtx.fgLayer.isNil:
-        storieCtx.fgLayer.buffer.clearTransparent()
+    for layer in globalState.layers:
+      layer.buffer.clearTransparent()
     
     # Call render - this writes to layers
     renderStorie(globalState)
@@ -1225,56 +1211,13 @@ when defined(emscripten):
   
   proc emSetWaitingForGist() {.exportc.} =
     ## Set flag to wait for gist content instead of loading index.md
-    gWaitingForGist = true
-    # Ensure storieCtx exists (will be properly initialized later)
-    if storieCtx.isNil:
-      storieCtx = StorieContext()
+    ## Only relevant for Nimini-based markdown systems
+    discard  # Not used by blog engine
   
   proc emLoadMarkdownFromJS(markdownContent: cstring) {.exportc.} =
     ## Load markdown content from JavaScript and reinitialize the storie context
-    try:
-      # Convert cstring to string safely
-      if markdownContent.isNil:
-        lastError = "markdownContent is nil"
-        return
-      
-      let content = $markdownContent
-      
-      # Ensure content is valid
-      if content.len == 0:
-        lastError = "content is empty"
-        return
-      
-      # Parse the markdown
-      let blocks = parseMarkdown(content)
-      
-      # Check if we got any blocks
-      if blocks.len == 0:
-        lastError = "no blocks parsed from " & $content.len & " bytes"
-        return
-      
-      # Update the storie context with new code blocks
-      if not storieCtx.isNil and not storieCtx.niminiContext.isNil:
-        gWaitingForGist = false
-        
-        # Replace the code blocks
-        storieCtx.codeBlocks = blocks
-        
-        # Clear all layer buffers
-        for layer in globalState.layers:
-          layer.buffer.clear()
-        
-        # Execute init blocks immediately
-        for codeBlock in blocks:
-          if codeBlock.lifecycle == "init":
-            discard executeCodeBlock(storieCtx.niminiContext, codeBlock, globalState)
-        
-        # Execute render blocks immediately to show content
-        for codeBlock in blocks:
-          if codeBlock.lifecycle == "render":
-            discard executeCodeBlock(storieCtx.niminiContext, codeBlock, globalState)
-    except Exception as e:
-      discard # Silently fail in WASM
+    ## Only relevant for Nimini-based markdown systems
+    discard  # Not used by blog engine
 
 proc showHelp() =
   echo "storie v" & version

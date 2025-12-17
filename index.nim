@@ -1,604 +1,592 @@
-# TStorie entry point
+# Weblog - TStorie Blog Engine
+# A TUI blog reader built with TStorie
+# This file is included by tstorie.nim, so all TStorie APIs are available
 
-import strutils, tables, random, times
+import strutils, tables, times
 when not defined(emscripten):
-  import os
-import nimini
-import lib/drawing
+  import os, json
+
 import lib/storie_md
+import nimini
 
-# Helper to convert Value to int (handles both int and float values)
-proc valueToInt(v: Value): int =
-  case v.kind
-  of vkInt: return v.i
-  of vkFloat: return int(v.f)
-  else: return 0
+# Layers (forward declared for use in nimini runtime)
+var headerLayer: Layer
+var contentLayer: Layer
+var footerLayer: Layer
 
-# ================================================================
-# NIMINI INTEGRATION
-# ================================================================
+# Global nimini runtime environment (persists across code executions)
+var blogRuntimeEnv: ref Env = nil
 
-type
-  NiminiContext = ref object
-    env: ref Env
-
-# ================================================================
-# NIMINI WRAPPERS - Bridge storie functions to Nimini
-# ================================================================
-
-# Global references to layers (set in initStorieContext)
-var gBgLayer: Layer
-var gFgLayer: Layer
-var gTextStyle, gBorderStyle, gInfoStyle: Style
-var gAppState: AppState  # Global reference to app state for state accessors
-
-# Type conversion functions
-proc nimini_int(env: ref Env; args: seq[Value]): Value =
-  ## Convert a value to integer
-  if args.len > 0:
-    case args[0].kind
-    of vkInt: return args[0]
-    of vkFloat: return valInt(args[0].f.int)
-    of vkString: 
-      try:
-        return valInt(parseInt(args[0].s))
-      except:
-        return valInt(0)
-    of vkBool: return valInt(if args[0].b: 1 else: 0)
-    else: return valInt(0)
-  return valInt(0)
-
-proc nimini_float(env: ref Env; args: seq[Value]): Value =
-  ## Convert a value to float
-  if args.len > 0:
-    case args[0].kind
-    of vkFloat: return args[0]
-    of vkInt: return valFloat(args[0].i.float)
-    of vkString: 
-      try:
-        return valFloat(parseFloat(args[0].s))
-      except:
-        return valFloat(0.0)
-    of vkBool: return valFloat(if args[0].b: 1.0 else: 0.0)
-    else: return valFloat(0.0)
-  return valFloat(0.0)
-
-proc nimini_str(env: ref Env; args: seq[Value]): Value =
-  ## Convert a value to string
-  if args.len > 0:
-    return valString($args[0])
-  return valString("")
-
-# Print function
-proc print(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  var output = ""
-  for i, arg in args:
-    if i > 0: output.add(" ")
-    case arg.kind
-    of vkInt: output.add($arg.i)
-    of vkFloat: output.add($arg.f)
-    of vkString: output.add(arg.s)
-    of vkBool: output.add($arg.b)
-    of vkNil: output.add("nil")
-    else: output.add("<value>")
-  echo output
-  return valNil()
-
-# Buffer drawing functions
-proc bgClear(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  gBgLayer.bgClear()
-  return valNil()
-
-proc bgClearTransparent(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  gBgLayer.bgClearTransparent()
-  return valNil()
-
-proc fgClear(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  gFgLayer.fgClear()
-  return valNil()
-
-proc fgClearTransparent(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  gFgLayer.fgClearTransparent()
-  return valNil()
-
-proc bgWrite(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  if args.len >= 3:
-    let x = valueToInt(args[0])
-    let y = valueToInt(args[1])
-    let ch = args[2].s
-    let style = if args.len >= 4: gTextStyle else: gTextStyle  # TODO: support style arg
-    gBgLayer.bgWrite(x, y, ch, style)
-  return valNil()
-
-proc fgWrite(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  if args.len >= 3:
-    let x = valueToInt(args[0])
-    let y = valueToInt(args[1])
-    let ch = args[2].s
-    let style = if args.len >= 4: gTextStyle else: gTextStyle
-    gFgLayer.fgWrite(x, y, ch, style)
-  return valNil()
-
-proc bgWriteText(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  if args.len >= 3:
-    let x = valueToInt(args[0])
-    let y = valueToInt(args[1])
-    let text = args[2].s
-    gBgLayer.bgWriteText(x, y, text, gTextStyle)
-  return valNil()
-
-proc fgWriteText(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  if args.len >= 3:
-    let x = valueToInt(args[0])
-    let y = valueToInt(args[1])
-    let text = args[2].s
-    gFgLayer.fgWriteText(x, y, text, gTextStyle)
-  return valNil()
-
-proc bgFillRect(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  if args.len >= 5:
-    let x = valueToInt(args[0])
-    let y = valueToInt(args[1])
-    let w = valueToInt(args[2])
-    let h = valueToInt(args[3])
-    let ch = args[4].s
-    gBgLayer.bgFillRect(x, y, w, h, ch, gTextStyle)
-  return valNil()
-
-proc fgFillRect(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  if args.len >= 5:
-    let x = valueToInt(args[0])
-    let y = valueToInt(args[1])
-    let w = valueToInt(args[2])
-    let h = valueToInt(args[3])
-    let ch = args[4].s
-    gFgLayer.fgFillRect(x, y, w, h, ch, gTextStyle)
-  return valNil()
-
-# Random number functions
-proc randInt(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Generate random integer: randInt(max) returns 0..max-1, randInt(min, max) returns min..max-1
-  if args.len == 0:
-    return valInt(0)
-  elif args.len == 1:
-    let max = valueToInt(args[0])
-    return valInt(rand(max - 1))
-  else:
-    let min = valueToInt(args[0])
-    let max = valueToInt(args[1])
-    return valInt(rand(max - min - 1) + min)
-
-proc randFloat(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Generate random float: randFloat() returns 0.0..1.0, randFloat(max) returns 0.0..max
-  if args.len == 0:
-    return valFloat(rand(1.0))
-  else:
-    let max = case args[0].kind
-      of vkFloat: args[0].f
-      of vkInt: args[0].i.float
-      else: 1.0
-    return valFloat(rand(max))
-
-# Time functions - work across platforms including WASM
-proc getYear(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get current year (e.g., 2025)
-  let now = now()
-  return valInt(now.year)
-
-proc getMonth(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get current month (1-12)
-  let now = now()
-  return valInt(now.month.int)
-
-proc getDay(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get current day of month (1-31)
-  let now = now()
-  return valInt(now.monthday)
-
-proc getHour(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get current hour (0-23)
-  let now = now()
-  return valInt(now.hour)
-
-proc getMinute(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get current minute (0-59)
-  let now = now()
-  return valInt(now.minute)
-
-proc getSecond(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get current second (0-59)
-  let now = now()
-  return valInt(now.second)
-
-proc drawFigletDigit(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Draw a figlet digit at x, y position. Args: digit(0-9 or 10 for colon), x, y
-  if args.len >= 3:
-    let digit = valueToInt(args[0])
-    let x = valueToInt(args[1])
-    let y = valueToInt(args[2])
-    gFgLayer.drawFigletDigit(digit, x, y, gTextStyle)
-  return valNil()
-
-# ================================================================
-# STATE ACCESSORS - Expose AppState to user scripts
-# ================================================================
-
-proc getTermWidth(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get current terminal width
-  return valInt(gAppState.termWidth)
-
-proc getTermHeight(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get current terminal height
-  return valInt(gAppState.termHeight)
-
-proc getTargetFps(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get the target FPS
-  return valFloat(gAppState.targetFps)
-
-proc setTargetFps(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Set the target FPS. Args: fps (number)
-  if args.len > 0:
-    let fps = case args[0].kind
-      of vkFloat: args[0].f
-      of vkInt: args[0].i.float
-      else: 60.0
-    gAppState.setTargetFps(fps)
-  return valNil()
-
-proc getFps(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get the current actual FPS
-  return valFloat(gAppState.fps)
-
-proc getFrameCount(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get the total frame count
-  return valInt(gAppState.frameCount)
-
-proc getTotalTime(env: ref Env; args: seq[Value]): Value {.nimini.} =
-  ## Get the total elapsed time in seconds
-  return valFloat(gAppState.totalTime)
-
-proc createNiminiContext(state: AppState): NiminiContext =
-  ## Create a Nimini interpreter context with exposed APIs
-  initRuntime()
-  initStdlib()  # Register standard library functions (add, len, etc.)
-  
-  # Register type conversion functions with custom names
-  registerNative("int", nimini_int)
-  registerNative("float", nimini_float)
-  registerNative("str", nimini_str)
-  
-  # Auto-register all {.nimini.} pragma functions
-  exportNiminiProcs(
-    print,
-    bgClear, bgClearTransparent, bgWrite, bgWriteText, bgFillRect,
-    fgClear, fgClearTransparent, fgWrite, fgWriteText, fgFillRect,
-    randInt, randFloat,
-    getYear, getMonth, getDay, getHour, getMinute, getSecond,
-    drawFigletDigit,
-    getTermWidth, getTermHeight, getTargetFps, setTargetFps,
-    getFps, getFrameCount, getTotalTime
-  )
-  
-  let ctx = NiminiContext(env: runtimeEnv)
-  
-  return ctx
-
-proc executeCodeBlock(context: NiminiContext, codeBlock: CodeBlock, state: AppState): bool =
-  ## Execute a code block using Nimini
-  ## 
-  ## Scoping rules:
-  ## - 'init' blocks execute in global scope (all vars become global)
-  ## - Other blocks execute in child scope:
-  ##   - 'var x = 5' creates local variable
-  ##   - 'x = 5' updates parent scope if exists, else creates local
-  ##   - Reading variables walks up scope chain automatically
-  if codeBlock.code.strip().len == 0:
-    return true
-  
-  try:
-    # Build a wrapper that includes state access
-    # We expose common variables directly in the script context
-    var scriptCode = ""
+proc ensureBlogRuntime() =
+  if blogRuntimeEnv.isNil:
+    initRuntime()
+    initStdlib()
+    blogRuntimeEnv = runtimeEnv
     
-    # Add state field accessors as local variables
-    scriptCode.add("var termWidth = " & $state.termWidth & "\n")
-    scriptCode.add("var termHeight = " & $state.termHeight & "\n")
-    scriptCode.add("var fps = " & formatFloat(state.fps, ffDecimal, 2) & "\n")
-    scriptCode.add("var frameCount = " & $state.frameCount & "\n")
-    scriptCode.add("\n")
-    
-    # Add user code
-    scriptCode.add(codeBlock.code)
-    
-    let tokens = tokenizeDsl(scriptCode)
-    let program = parseDsl(tokens)
-    
-    # Choose execution environment based on lifecycle
-    # 'init' blocks run in global scope to define persistent state
-    # Other blocks run in child scope for local variables
-    let execEnv = if codeBlock.lifecycle == "init":
-      context.env  # Global scope
-    else:
-      newEnv(context.env)  # Child scope with parent link
-    
-    execProgram(program, execEnv)
-    
-    return true
-  except Exception as e:
-    when not defined(emscripten):
-      echo "Error in ", codeBlock.lifecycle, " block: ", e.msg
-    # In WASM, we can't echo, so we'll just fail silently but return false
-    when defined(emscripten):
-      lastError = "Error in on:" & codeBlock.lifecycle & " - " & e.msg
-    return false
-
-# ================================================================
-# LIFECYCLE MANAGEMENT
-# ================================================================
-
-type
-  StorieContext = ref object
-    codeBlocks: seq[CodeBlock]
-    niminiContext: NiminiContext
-    frontMatter: FrontMatter  # Front matter from markdown
-    # Pre-compiled layer references
-    bgLayer: Layer
-    fgLayer: Layer
-    
-var storieCtx: StorieContext
-var gWaitingForGist: bool = false  # Global flag set before context initialization
-
-proc loadAndParseMarkdown(): MarkdownDocument =
-  ## Load index.md and parse it for code blocks and front matter
-  when defined(emscripten):
-    # Check if we're waiting for gist content
-    if gWaitingForGist:
-      # Return empty document - gist content will be loaded via JavaScript
-      return MarkdownDocument()
-    
-    # In WASM, embed the markdown at compile time
-    # Use staticRead with the markdown content
-    const mdContent = staticRead("index.md")
-    const mdLines = mdContent.splitLines()
-    const mdLineCount = mdLines.len
-    
-    # Debug: detailed parsing info
-    when defined(emscripten):
-      lastError = "MD:" & $mdContent.len & "ch," & $mdLineCount & "ln"
+    # Register TStorie drawing functions for nimini code
+    registerNative("fgWriteText", proc(env: ref Env; args: seq[Value]): Value =
+      if args.len < 3:
+        echo "fgWriteText requires at least 3 arguments: x, y, text"
+        return valNil()
       
-    let doc = parseMarkdownDocument(mdContent)
-    
-    when defined(emscripten):
-      if doc.codeBlocks.len == 0:
-        lastError = lastError & "|0blocks"
-        # Show first few lines of markdown to debug
-        var preview = ""
-        for i in 0 ..< min(3, mdLineCount):
-          if i > 0: preview.add(";")
-          let line = mdLines[i]
-          preview.add(if line.len > 20: line[0..19] else: line)
-        lastError = lastError & "|" & preview
+      let x = args[0].i
+      let y = args[1].i
+      let text = args[2].s
+      
+      # Use content layer for drawing (layer must be initialized first)
+      if not contentLayer.isNil:
+        var drawStyle = defaultStyle()
+        contentLayer.buffer.writeText(x, y, text, drawStyle)
       else:
-        lastError = "" # Success!
-    return doc
-  else:
-    # In native builds, read from filesystem
-    let mdPath = "index.md"
+        echo "Warning: contentLayer not initialized"
+      
+      valNil()
+    )
     
-    if not fileExists(mdPath):
-      echo "Warning: index.md not found, using default behavior"
-      return MarkdownDocument()
-    
-    try:
-      let content = readFile(mdPath)
-      return parseMarkdownDocument(content)
-    except:
-      echo "Error reading index.md: ", getCurrentExceptionMsg()
-      return MarkdownDocument()
+    registerNative("defaultStyle", proc(env: ref Env; args: seq[Value]): Value =
+      # Return a placeholder value (we handle styling in the fgWriteText wrapper)
+      valNil()
+    )
 
 # ================================================================
-# INITIALIZE CONTEXT AND LAYERS
+# BLOG ENGINE TYPES AND DATA
 # ================================================================
 
-proc initStorieContext(state: AppState) =
-  ## Initialize the Storie context, parse Markdown, and set up layers
-  if storieCtx.isNil:
-    storieCtx = StorieContext()
+type
+  Article = object
+    title: string
+    author: string
+    date: string
+    category: string
+    excerpt: string
+    filename: string      # Path to article file
+    content: seq[string]  # Pre-split lines (loaded on demand)
+    loaded: bool          # Whether content has been loaded
+    codeBlocks: seq[CodeBlock]  # Nimini code blocks from markdown
+
+var articles: seq[Article]
+var currentArticleIndex = 0
+var currentView = "list"  # "list" or "article"
+var scrollPos = 0
+var isLoadingArticle = false  # Track loading state
+
+# ================================================================
+# ARTICLE LOADING
+# ================================================================
+
+when defined(emscripten):
+  # JavaScript interop for fetch API using EM_JS macros
+  {.emit: """/*INCLUDESECTION*/
+#include <emscripten.h>
+
+// Global state for articles
+EM_JS(void, emFetchArticleIndex, (), {
+  if (!window.articlesFetched) {
+    window.articlesFetched = true;
+    window.articlesData = null;
+    window.articleContentCallbacks = {};
+    
+    console.log('Fetching articles/index.json...');
+    fetch('articles/index.json')
+      .then(response => response.json())
+      .then(data => {
+        console.log('Articles fetched:', data);
+        console.log('data["articles"]:', data['articles']);
+        if (data && data['articles'] && Array.isArray(data['articles'])) {
+          window.articlesData = data['articles'];
+        } else {
+          window.articlesData = [];
+        }
+        console.log('window.articlesData set to:', window.articlesData);
+        console.log('Calling _emOnArticlesLoaded with', window.articlesData.length, 'articles');
+        _emOnArticlesLoaded();
+      })
+      .catch(error => {
+        console.error('Error fetching articles:', error);
+        window.articlesData = [];
+        _emOnArticlesLoaded();
+      });
+  } else {
+    console.log('Articles already fetched, skipping');
+  }
+});
+
+EM_JS(int, emGetArticlesCount, (), {
+  return window.articlesData ? window.articlesData.length : 0;
+});
+
+EM_JS(char*, emGetArticleFieldRaw, (int index, const char* field), {
+  if (!window.articlesData || index >= window.articlesData.length) {
+    var ptr = _malloc(1);
+    HEAP8[ptr] = 0;
+    return ptr;
+  }
+  var fieldName = UTF8ToString(field);
+  var value = window.articlesData[index][fieldName] || '';
+  var lengthBytes = lengthBytesUTF8(value) + 1;
+  var ptr = _malloc(lengthBytes);
+  stringToUTF8(value, ptr, lengthBytes);
+  return ptr;
+});
+
+EM_JS(void, emFetchArticleContentRaw, (const char* filename, int callbackId), {
+  var fname = UTF8ToString(filename);
+  fetch('articles/' + fname)
+    .then(response => response.text())
+    .then(content => {
+      if (!window.articleContentCallbacks) window.articleContentCallbacks = {};
+      window.articleContentCallbacks[callbackId] = content;
+      _emOnArticleContentLoaded(callbackId);
+    })
+    .catch(error => {
+      console.error('Error fetching article:', error);
+      if (!window.articleContentCallbacks) window.articleContentCallbacks = {};
+      window.articleContentCallbacks[callbackId] = '';
+      _emOnArticleContentLoaded(callbackId);
+    });
+});
+
+EM_JS(char*, emGetArticleContentRaw, (int callbackId), {
+  if (!window.articleContentCallbacks) window.articleContentCallbacks = {};
+  var content = window.articleContentCallbacks[callbackId] || '';
+  delete window.articleContentCallbacks[callbackId];
+  var lengthBytes = lengthBytesUTF8(content) + 1;
+  var ptr = _malloc(lengthBytes);
+  stringToUTF8(content, ptr, lengthBytes);
+  return ptr;
+});
+""".}
   
-  # Load and parse markdown document (with front matter)
-  let doc = loadAndParseMarkdown()
-  storieCtx.codeBlocks = doc.codeBlocks
-  storieCtx.frontMatter = doc.frontMatter
+  proc emFetchArticleIndex() {.importc, nodecl.}
+  proc emGetArticlesCount(): cint {.importc, nodecl.}
+  proc emGetArticleFieldRaw(index: cint, field: cstring): cstring {.importc, nodecl.}
+  proc emFetchArticleContentRaw(filename: cstring, callbackId: cint) {.importc, nodecl.}
+  proc emGetArticleContentRaw(callbackId: cint): cstring {.importc, nodecl.}
   
+  # Nim wrappers for C string handling
+  proc emGetArticleField(index: cint, field: cstring): string =
+    result = $emGetArticleFieldRaw(index, field)
+  
+  proc emFetchArticleContent(filename: cstring, callbackId: cint) =
+    emFetchArticleContentRaw(filename, callbackId)
+  
+  proc emGetArticleContent(callbackId: cint): string =
+    result = $emGetArticleContentRaw(callbackId)
+  
+  var articleContentCounter = 0
+  var pendingArticleLoads: Table[int, int] = initTable[int, int]()  # callbackId -> articleIndex
+  
+  # Forward declaration
+  proc loadArticleContent(index: int)
+  
+  proc emOnArticlesLoaded() {.exportc.} =
+    ## Called from JavaScript when articles index is loaded
+    let count = emGetArticlesCount()
+    echo "Articles loaded callback: count = ", count
+    articles = @[]
+    
+    for i in 0 ..< count:
+      let article = Article(
+        title: emGetArticleField(i.cint, "title"),
+        date: emGetArticleField(i.cint, "date"),
+        author: emGetArticleField(i.cint, "author"),
+        category: emGetArticleField(i.cint, "category"),
+        excerpt: emGetArticleField(i.cint, "excerpt"),
+        filename: emGetArticleField(i.cint, "filename"),
+        content: @[],
+        loaded: false,
+        codeBlocks: @[]
+      )
+      echo "  Article ", i, ": ", article.title
+      articles.add(article)
+    
+    # Load first article if available
+    if articles.len > 0:
+      loadArticleContent(0)
+  
+  proc emOnArticleContentLoaded(callbackId: cint) {.exportc.} =
+    ## Called from JavaScript when article content is loaded
+    let content = emGetArticleContent(callbackId)
+    let articleIndex = pendingArticleLoads.getOrDefault(callbackId.int, -1)
+    
+    if articleIndex >= 0 and articleIndex < articles.len:
+      if content.len > 0:
+        let lines = content.splitLines()
+        var inFrontMatter = false
+        var bodyStart = 0
+        
+        # Skip front matter
+        for i, line in lines:
+          if i == 0 and line.strip().startsWith("---"):
+            inFrontMatter = true
+            continue
+          if inFrontMatter and line.strip().startsWith("---"):
+            bodyStart = i + 1
+            break
+        
+        # Add content lines
+        articles[articleIndex].content = @[]
+        for i in bodyStart ..< lines.len:
+          articles[articleIndex].content.add(lines[i])
+        
+        # Parse markdown for nimini code blocks
+        let doc = parseMarkdownDocument(content)
+        articles[articleIndex].codeBlocks = doc.codeBlocks
+        
+        # Execute init code blocks
+        for codeBlock in articles[articleIndex].codeBlocks:
+          if codeBlock.lifecycle == "init":
+            try:
+              ensureBlogRuntime()
+              let tokens = tokenizeDsl(codeBlock.code)
+              let program = parseDsl(tokens)
+              execProgram(program, blogRuntimeEnv)
+            except:
+              echo "Error executing init block: ", getCurrentExceptionMsg()
+        
+        articles[articleIndex].loaded = true
+      
+      pendingArticleLoads.del(callbackId.int)
+      isLoadingArticle = false
+  
+  proc loadArticleContent(index: int) =
+    ## Load content for a specific article
+    if index < 0 or index >= articles.len:
+      return
+    
+    if articles[index].loaded:
+      return  # Already loaded
+    
+    isLoadingArticle = true
+    inc articleContentCounter
+    pendingArticleLoads[articleContentCounter] = index
+    emFetchArticleContent(articles[index].filename.cstring, articleContentCounter.cint)
+  
+  proc initArticlesFromWeb() =
+    ## Initialize articles by fetching from server
+    emFetchArticleIndex()
+when not defined(emscripten):
+  proc loadArticlesFromIndex(): seq[Article] =
+    ## Load articles from index.json
+    result = @[]
+    let indexPath = "articles/index.json"
+    
+    if fileExists(indexPath):
+      try:
+        let jsonContent = readFile(indexPath)
+        let data = parseJson(jsonContent)
+        
+        for item in data["articles"]:
+          var article = Article(
+            title: item["title"].getStr(),
+            date: item["date"].getStr(),
+            author: item["author"].getStr(),
+            category: item["category"].getStr(),
+            excerpt: item["excerpt"].getStr(),
+            filename: item["filename"].getStr(),
+            content: @[],
+            loaded: false,
+            codeBlocks: @[]
+          )
+          
+          # Load actual article content from file
+          let articlePath = "articles/" & item["filename"].getStr()
+          if fileExists(articlePath):
+            let content = readFile(articlePath)
+            let lines = content.splitLines()
+            var inFrontMatter = false
+            var bodyStart = 0
+            
+            # Skip front matter
+            for i, line in lines:
+              if i == 0 and line.strip().startsWith("---"):
+                inFrontMatter = true
+                continue
+              if inFrontMatter and line.strip().startsWith("---"):
+                bodyStart = i + 1
+                break
+            
+            # Add content lines
+            for i in bodyStart ..< lines.len:
+              article.content.add(lines[i])
+            
+            # Parse markdown for nimini code blocks
+            let doc = parseMarkdownDocument(content)
+            article.codeBlocks = doc.codeBlocks
+            article.loaded = true
+          
+          result.add(article)
+      except:
+        echo "Error loading articles: ", getCurrentExceptionMsg()
+
+proc initArticles() =
   when defined(emscripten):
-    if storieCtx.codeBlocks.len == 0 and lastError.len == 0 and not gWaitingForGist:
-      lastError = "No code blocks parsed"
-  
-  # Apply front matter settings to state
-  if storieCtx.frontMatter.hasKey("targetFPS"):
-    try:
-      let fps = parseFloat(storieCtx.frontMatter["targetFPS"])
-      state.setTargetFps(fps)
-      when not defined(emscripten):
-        echo "Set target FPS from front matter: ", fps
-    except:
-      when not defined(emscripten):
-        echo "Warning: Invalid targetFPS value in front matter"
-  
-  # Create default layers that code blocks can use
-  storieCtx.bgLayer = state.addLayer("background", 0)
-  storieCtx.fgLayer = state.addLayer("foreground", 10)
-  
-  # Initialize styles
-  var textStyle = defaultStyle()
-  textStyle.fg = cyan()
-  textStyle.bold = true
-
-  var borderStyle = defaultStyle()
-  borderStyle.fg = green()
-
-  var infoStyle = defaultStyle()
-  infoStyle.fg = yellow()
-  
-  # Set global references for Nimini wrappers
-  gBgLayer = storieCtx.bgLayer
-  gFgLayer = storieCtx.fgLayer
-  gTextStyle = textStyle
-  gBorderStyle = borderStyle
-  gInfoStyle = infoStyle
-  gAppState = state  # Store state reference for accessors
-  
-  when not defined(emscripten):
-    echo "Loaded ", storieCtx.codeBlocks.len, " code blocks from index.md"
-    if storieCtx.frontMatter.len > 0:
-      echo "Front matter keys: ", toSeq(storieCtx.frontMatter.keys).join(", ")
-  
-  storieCtx.niminiContext = createNiminiContext(state)
-  
-  # Expose front matter to user scripts as global variables
-  for key, value in storieCtx.frontMatter.pairs:
-    # Try to parse as number first, otherwise store as string
-    try:
-      let numVal = parseFloat(value)
-      if '.' in value:
-        setGlobal(key, valFloat(numVal))
-      else:
-        setGlobal(key, valInt(numVal.int))
-    except:
-      # Not a number, store as string
-      setGlobal(key, valString(value))
-  
-  # Execute init code blocks
-  for codeBlock in storieCtx.codeBlocks:
-    if codeBlock.lifecycle == "init":
-      if not executeCodeBlock(storieCtx.niminiContext, codeBlock, state):
-        when defined(emscripten):
-          if lastError.len == 0:
-            lastError = "init block failed"
+    # Fetch articles from server for web build
+    initArticlesFromWeb()
+  else:
+    # Load from filesystem
+    articles = loadArticlesFromIndex()
+    if articles.len == 0:
+      # Fallback if loading fails
+      echo "Warning: Could not load articles from index.json"
+      articles = @[
+        Article(
+          title: "Welcome to Weblog",
+          author: "Maddest Labs",
+          date: "2024-12-01",
+          category: "announcements",
+          excerpt: "An introduction to building terminal-based blogs",
+          filename: "",
+          content: @["# Welcome to Weblog", "", "No articles found in articles/index.json", "", "Please run: nim c -r tools/generate_index.nim"],
+          loaded: true,
+          codeBlocks: @[]
+        )
+      ]
 
 # ================================================================
-# CALLBACK IMPLEMENTATIONS
+# RENDERING
 # ================================================================
 
-onInit = proc(state: AppState) =
-  initStorieContext(state)
-
-onUpdate = proc(state: AppState, dt: float) =
-  if storieCtx.isNil:
+proc renderHeader(state: AppState) =
+  if headerLayer.isNil:
     return
   
-  # Execute update code blocks
-  for codeBlock in storieCtx.codeBlocks:
-    if codeBlock.lifecycle == "update":
-      discard executeCodeBlock(storieCtx.niminiContext, codeBlock, state)
+  headerLayer.buffer.clearTransparent()
+  
+  # Title
+  var titleStyle = defaultStyle()
+  titleStyle.fg = cyan()
+  titleStyle.bold = true
+  headerLayer.buffer.writeText(2, 0, "Weblog - TStorie Blog", titleStyle)
+  
+  # Navigation hint
+  var navStyle = defaultStyle()
+  navStyle.fg = yellow()
+  headerLayer.buffer.writeText(state.termWidth - 20, 0, "L: List | Q: Quit", navStyle)
+  
+  # Separator
+  var sepStyle = defaultStyle()
+  for x in 0 ..< state.termWidth:
+    headerLayer.buffer.writeText(x, 1, "─", sepStyle)
 
-onRender = proc(state: AppState) =
-  if storieCtx.isNil:
-    when defined(emscripten):
-      lastRenderExecutedCount = 0
-      # Write error directly to currentBuffer so it's visible
-      var errStyle = defaultStyle()
-      errStyle.fg = red()
-      errStyle.bold = true
-      state.currentBuffer.writeText(5, 5, "ERROR: storieCtx is nil!", errStyle)
-    # Fallback rendering if no context
-    let msg = "No index.md found or parsing failed"
-    let x = (state.termWidth - msg.len) div 2
-    let y = state.termHeight div 2
-    var fallbackStyle = defaultStyle()
-    fallbackStyle.fg = cyan()
-    state.currentBuffer.writeText(x, y, msg, fallbackStyle)
-    return
+proc renderFooter(state: AppState) =
+  footerLayer.buffer.clearTransparent()
   
-  # Check if we have any render blocks
-  var hasRenderBlocks = false
-  var renderBlockCount = 0
-  for codeBlock in storieCtx.codeBlocks:
-    if codeBlock.lifecycle == "render":
-      hasRenderBlocks = true
-      renderBlockCount += 1
+  let y = state.termHeight - 1
   
-  if not hasRenderBlocks:
-    when defined(emscripten):
-      lastRenderExecutedCount = 0
-      if lastError.len == 0:
-        lastError = "No on:render blocks"
-    # Fallback if no render blocks found
-    state.currentBuffer.clear()
-    let msg = "No render blocks found in index.md"
-    let x = (state.termWidth - msg.len) div 2
-    let y = state.termHeight div 2
-    var fallbackInfoStyle = defaultStyle()
-    fallbackInfoStyle.fg = yellow()
-    state.currentBuffer.writeText(x, y, msg, fallbackInfoStyle)
+  # Separator
+  var sepStyle = defaultStyle()
+  for x in 0 ..< state.termWidth:
+    footerLayer.buffer.writeText(x, y - 1, "─", sepStyle)
+  
+  # Status
+  var statusStyle = defaultStyle()
+  if articles.len > 0:
+    let status = "Article " & $(currentArticleIndex + 1) & "/" & $articles.len
+    footerLayer.buffer.writeText(2, y, status, statusStyle)
+  
+  footerLayer.buffer.writeText(state.termWidth - 20, y, "Press H for help", statusStyle)
+
+proc renderArticleList(state: AppState) =
+  contentLayer.buffer.clearTransparent()
+  
+  var y = 3
+  var titleStyle = defaultStyle()
+  titleStyle.fg = cyan()
+  titleStyle.bold = true
+  contentLayer.buffer.writeText(2, y, "Articles", titleStyle)
+  y += 2
+  
+  # Render article list
+  for i in 0 ..< articles.len:
+    if y >= state.termHeight - 3:
+      break
     
-    # Show what blocks we DO have
-    when defined(emscripten):
-      var debugStyle = defaultStyle()
-      debugStyle.fg = cyan()
-      var debugY = y + 2
-      for codeBlock in storieCtx.codeBlocks:
-        let info = "Found: on:" & codeBlock.lifecycle
-        state.currentBuffer.writeText(x, debugY, info, debugStyle)
-        debugY += 1
+    # Highlight current article
+    if i == currentArticleIndex:
+      var selStyle = defaultStyle()
+      selStyle.fg = yellow()
+      selStyle.bold = true
+      contentLayer.buffer.writeText(0, y, ">", selStyle)
+      contentLayer.buffer.writeText(2, y, articles[i].date & " - " & articles[i].title, selStyle)
+    else:
+      var normStyle = defaultStyle()
+      contentLayer.buffer.writeText(2, y, articles[i].date & " - " & articles[i].title, normStyle)
+    
+    y += 1
+
+proc renderArticle(state: AppState) =
+  contentLayer.buffer.clearTransparent()
+  
+  if currentArticleIndex < 0 or currentArticleIndex >= articles.len:
     return
+  
+  let article = articles[currentArticleIndex]
+  var y = 3
+  
+  # Show loading indicator if article isn't loaded yet
+  if not article.loaded:
+    var loadingStyle = defaultStyle()
+    loadingStyle.fg = yellow()
+    contentLayer.buffer.writeText(2, y, "Loading article...", loadingStyle)
+    when defined(emscripten):
+      if not isLoadingArticle:
+        loadArticleContent(currentArticleIndex)
+    return
+  
+  # Title
+  var titleStyle = defaultStyle()
+  titleStyle.fg = cyan()
+  titleStyle.bold = true
+  contentLayer.buffer.writeText(2, y, article.title, titleStyle)
+  y += 2
+  
+  # Metadata
+  var metaStyle = defaultStyle()
+  metaStyle.fg = gray(180)
+  contentLayer.buffer.writeText(2, y, "By " & article.author & " on " & article.date, metaStyle)
+  y += 2
+  
+  # Separator
+  var sepStyle = defaultStyle()
+  for x in 2 ..< state.termWidth - 2:
+    contentLayer.buffer.writeText(x, y, "─", sepStyle)
+  y += 2
   
   # Execute render code blocks
-  var executedCount = 0
-  for codeBlock in storieCtx.codeBlocks:
+  for codeBlock in article.codeBlocks:
     if codeBlock.lifecycle == "render":
-      let success = executeCodeBlock(storieCtx.niminiContext, codeBlock, state)
-      if success:
-        executedCount += 1
+      try:
+        ensureBlogRuntime()
+        let tokens = tokenizeDsl(codeBlock.code)
+        let program = parseDsl(tokens)
+        execProgram(program, blogRuntimeEnv)
+      except:
+        echo "Error executing render block: ", getCurrentExceptionMsg()
   
-  # Debug: Show execution status in WASM
-  # Write to foreground layer so user code renders, then we overlay debug on layers
-  when defined(emscripten):
-    var debugStyle = defaultStyle()
-    debugStyle.fg = green()
-    debugStyle.bold = true
-    storieCtx.fgLayer.buffer.writeText(2, 2, "Blocks: " & $storieCtx.codeBlocks.len & " Render: " & $renderBlockCount & " Exec: " & $executedCount, debugStyle)
-
-    # Publish executedCount to WASM HUD
-    lastRenderExecutedCount = executedCount
-    
-    if executedCount == 0 and renderBlockCount > 0:
-      var errorStyle = defaultStyle()
-      errorStyle.fg = red()
-      errorStyle.bold = true
-      storieCtx.fgLayer.buffer.writeText(2, 3, "Render execution FAILED!", errorStyle)
-      # Also show last error if available
-      if lastError.len > 0:
-        storieCtx.fgLayer.buffer.writeText(2, 4, "Error: " & lastError, errorStyle)
-    
-    # Also show frame count to verify rendering is happening
-    var fpsStyle = defaultStyle()
-    fpsStyle.fg = yellow()
-    storieCtx.fgLayer.buffer.writeText(2, 0, "Frame: " & $state.frameCount, fpsStyle)
-
-onInput = proc(state: AppState, event: InputEvent): bool =
-  if storieCtx.isNil:
-    return false
+  # Content (with scrolling)
+  let startLine = max(0, scrollPos)
+  let maxLines = state.termHeight - y - 3
+  var renderedLines = 0
   
-  # Default quit behavior (Q or ESC)
-  if event.kind == KeyEvent and event.keyAction == Press:
-    if event.keyCode == ord('q') or event.keyCode == ord('Q') or event.keyCode == INPUT_ESCAPE:
+  for i in startLine ..< article.content.len:
+    if renderedLines >= maxLines:
+      break
+    
+    let line = article.content[i]
+    var lineStyle = defaultStyle()
+    if line.len > 0:
+      # Simple truncation if line is too long
+      let maxWidth = state.termWidth - 4
+      if line.len > maxWidth:
+        contentLayer.buffer.writeText(2, y, line[0 ..< maxWidth], lineStyle)
+      else:
+        contentLayer.buffer.writeText(2, y, line, lineStyle)
+    
+    y += 1
+    renderedLines += 1
+  
+  # Scroll indicators
+  var scrollStyle = defaultStyle()
+  scrollStyle.fg = rgb(100, 100, 100)
+  if scrollPos > 0:
+    contentLayer.buffer.writeText(state.termWidth - 10, 3, "^ More ^", scrollStyle)
+  if startLine + renderedLines < article.content.len:
+    contentLayer.buffer.writeText(state.termWidth - 10, y - 1, "v More v", scrollStyle)
+
+# ================================================================
+# CALLBACKS
+# ================================================================
+
+proc initBlogCallbacks*() =
+  ## Initialize blog engine callbacks
+  ## Must be called explicitly in WASM builds
+  onInit = proc(state: AppState) =
+    headerLayer = state.addLayer("header", 100)
+    contentLayer = state.addLayer("content", 50)
+    footerLayer = state.addLayer("footer", 90)
+    
+    initArticles()
+    currentArticleIndex = 0
+    currentView = "article"
+    scrollPos = 0
+
+  onUpdate = proc(state: AppState, dt: float) =
+    # Execute update code blocks for current article
+    if currentView == "article" and currentArticleIndex >= 0 and currentArticleIndex < articles.len:
+      let article = articles[currentArticleIndex]
+      if article.loaded:
+        for codeBlock in article.codeBlocks:
+          if codeBlock.lifecycle == "update":
+            try:
+              ensureBlogRuntime()
+              # Inject dt variable into runtime environment
+              setVar(blogRuntimeEnv, "dt", valFloat(dt))
+              let tokens = tokenizeDsl(codeBlock.code)
+              let program = parseDsl(tokens)
+              execProgram(program, blogRuntimeEnv)
+            except:
+              echo "Error executing update block: ", getCurrentExceptionMsg()
+
+  onRender = proc(state: AppState) =
+    renderHeader(state)
+    
+    if currentView == "list":
+      renderArticleList(state)
+    else:
+      renderArticle(state)
+    
+    renderFooter(state)
+
+  onInput = proc(state: AppState, event: InputEvent): bool =
+    if event.kind != KeyEvent or event.keyAction != Press:
+      return false
+    
+    case event.keyCode
+    of INPUT_UP:
+      if currentView == "list":
+        currentArticleIndex = max(0, currentArticleIndex - 1)
+      else:
+        scrollPos = max(0, scrollPos - 1)
+      return true
+    
+    of INPUT_DOWN:
+      if currentView == "list":
+        currentArticleIndex = min(articles.len - 1, currentArticleIndex + 1)
+      else:
+        scrollPos += 1
+      return true
+    
+    of INPUT_PAGE_UP:
+      scrollPos = max(0, scrollPos - 10)
+      return true
+    
+    of INPUT_PAGE_DOWN:
+      scrollPos += 10
+      return true
+    
+    of INPUT_ENTER:
+      if currentView == "list":
+        currentView = "article"
+        scrollPos = 0
+        # Load article content if not already loaded
+        when defined(emscripten):
+          if currentArticleIndex >= 0 and currentArticleIndex < articles.len:
+            if not articles[currentArticleIndex].loaded and not isLoadingArticle:
+              loadArticleContent(currentArticleIndex)
+      return true
+    
+    of ord('l'), ord('L'):
+      currentView = "list"
+      return true
+    
+    of ord('q'), ord('Q'), INPUT_ESCAPE:
       state.running = false
       return true
-  
-  # Execute input code blocks
-  for codeBlock in storieCtx.codeBlocks:
-    if codeBlock.lifecycle == "input":
-      if executeCodeBlock(storieCtx.niminiContext, codeBlock, state):
-        return true
-  
-  return false
+    
+    else:
+      return false
 
-onShutdown = proc(state: AppState) =
-  if storieCtx.isNil:
-    return
-  
-  # Execute shutdown code blocks
-  for codeBlock in storieCtx.codeBlocks:
-    if codeBlock.lifecycle == "shutdown":
-      discard executeCodeBlock(storieCtx.niminiContext, codeBlock, state)
+# Auto-initialize callbacks for native builds
+when not defined(emscripten):
+  initBlogCallbacks()

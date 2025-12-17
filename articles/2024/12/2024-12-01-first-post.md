@@ -1,6 +1,6 @@
 ---
 title: Welcome to TStorie Blog
-author: TStorie Team
+author: Maddest Labs
 date: 2024-12-01
 category: announcements
 tags: welcome, tui, introduction
